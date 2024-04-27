@@ -9,13 +9,14 @@ import torch
 import torch.onnx
 from nncf import CompressWeightsMode, compress_weights
 from onnxconverter_common import auto_convert_mixed_precision, float16
-from onnxruntime import InferenceSession, SessionOptions
+from onnxruntime import InferenceSession, SessionOptions, get_available_providers
 from onnxruntime.quantization import QuantType, quantize_dynamic
 from onnxruntime.quantization.shape_inference import quant_pre_process
 from onnxsim import simplify
 from tqdm import tqdm
 
-NUM_INFERENCES = 50
+
+NUM_INFERENCES = 200
 
 MODEL_PATH = Path("models/midas")
 OUTPUT_PATH = Path("outputs/midas")
@@ -97,6 +98,7 @@ def main():
         model_onnx_openvino_quantize, MODEL_PATH / "onnx_openvino_quantize.xml"
     )
 
+    """
     print("running torch openvino inference ...")
     ov_core = ov.Core()
     model_torch_openvino = ov_core.read_model(MODEL_PATH / "torch_openvino.xml")
@@ -127,6 +129,7 @@ def main():
     draw_depth(OUTPUT_PATH / "onnx_openvino_quantize.png", output)
     for _ in tqdm(range(NUM_INFERENCES)):
         _ = compiled_model_onnx_openvino(batch)
+    """
 
     print("running torch inference ...")
     with torch.no_grad():
@@ -147,12 +150,27 @@ def main():
         _ = ort_sess.run(None, {"input": batch.numpy()})
 
     print("running onnxruntime simplified inference ...")
-    ort_sess = InferenceSession(MODEL_PATH / "simple.onnx", opts)
+    ort_sess = InferenceSession(
+        MODEL_PATH / "simple.onnx", opts, providers=["CPUExecutionProvider"]
+    )
     output = ort_sess.run(None, {"input": batch.numpy()})
     draw_depth(OUTPUT_PATH / "onnx_simple.png", output)
     for i in tqdm(range(NUM_INFERENCES)):
         _ = ort_sess.run(None, {"input": batch.numpy()})
 
+    print("running onnxruntime simplified GPU inference ...")
+    gpu_provider = "CUDAExecutionProvider"
+    # gpu_provider = "TensorrtExecutionProvider"
+    ort_sess = InferenceSession(
+        MODEL_PATH / "simple.onnx", opts, providers=[gpu_provider]
+    )
+    output = ort_sess.run(None, {"input": batch.numpy()})
+    draw_depth(OUTPUT_PATH / "onnx_simple_gpu.png", output)
+    for i in tqdm(range(NUM_INFERENCES)):
+        _ = ort_sess.run(None, {"input": batch.numpy()})
+
+
+    """
     print("running onnxruntime simplified quantized inference ...")
     ort_sess = InferenceSession(MODEL_PATH / "simple_q.onnx", opts)
     output = ort_sess.run(None, {"input": batch.numpy()})
@@ -164,6 +182,19 @@ def main():
     ort_sess = InferenceSession(MODEL_PATH / "simple_fp16.onnx", opts)
     output = ort_sess.run(None, {"input": batch.numpy()})
     draw_depth(OUTPUT_PATH / "onnx_simple_fp16.png", output)
+    for i in tqdm(range(NUM_INFERENCES)):
+        _ = ort_sess.run(None, {"input": batch.numpy()})
+    """
+
+    print("running onnxruntime simplified with OpenVINOExecutionProvider inference ...")
+    ort_sess = InferenceSession(
+        MODEL_PATH / "simple.onnx",
+        opts,
+        providers=["OpenVINOExecutionProvider"],
+        provider_options=[{"num_of_threads": 1}],
+    )
+    output = ort_sess.run(None, {"input": batch.numpy()})
+    draw_depth(OUTPUT_PATH / "onnx_simple_openvion_exec.png", output)
     for i in tqdm(range(NUM_INFERENCES)):
         _ = ort_sess.run(None, {"input": batch.numpy()})
 

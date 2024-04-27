@@ -24,6 +24,7 @@ torchvision = {version = "^0.19.0.dev20240426+cpu", source = "torch_nightly"}
 onnxconverter-common = "^1.14.0"
 nncf = "^2.10.0"
 onnxruntime-openvino = "^1.17.1"
+onnxruntime-gpu = "^1.17.1"
 
 
 [tool.poetry.group.dev.dependencies]

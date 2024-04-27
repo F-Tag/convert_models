@@ -44,6 +44,7 @@ def main():
     model_onnx_openvino = ov.convert_model("yolox_tiny_simpl.onnx")
     ov.save_model(model_onnx_openvino, "yolox_tiny_onnx_openvino.xml")
 
+    """
     print("running torch openvino inference ...")
     ov_core = ov.Core()
     model_torch_openvino = ov_core.read_model("yolox_tiny_torch_openvino.xml")
@@ -60,6 +61,7 @@ def main():
     )
     for _ in tqdm(range(NUM_INFERENCES)):
         _ = compiled_model_onnx_openvino(dummy_input)
+    """
 
     print("running torch inference ...")
     for _ in tqdm(range(NUM_INFERENCES)):
@@ -75,7 +77,16 @@ def main():
         _ = ort_sess.run(None, {"input": dummy_input.numpy()})
 
     print("running onnxruntime simplified inference ...")
-    ort_sess = InferenceSession("yolox_tiny_simpl.onnx", opts)
+    ort_sess = InferenceSession(
+        "yolox_tiny_simpl.onnx", opts, providers=["CPUExecutionProvider"]
+    )
+    for i in tqdm(range(NUM_INFERENCES)):
+        _ = ort_sess.run(None, {"input": dummy_input.numpy()})
+
+    print("running onnxruntime simplified inference with OpenVINOExecutionProvider ...")
+    ort_sess = InferenceSession(
+        "yolox_tiny_simpl.onnx", opts, providers=["OpenVINOExecutionProvider"]
+    )
     for i in tqdm(range(NUM_INFERENCES)):
         _ = ort_sess.run(None, {"input": dummy_input.numpy()})
 
