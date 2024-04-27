@@ -1,0 +1,41 @@
+[tool.poetry]
+name = "convert-models"
+version = "0.1.0"
+description = ""
+authors = ["Fumiaki Taguchi <25476669+F-Tag@users.noreply.github.com>"]
+readme = "README.md"
+packages = [{include = "convert_models"}]
+
+[tool.poetry.dependencies]
+python = "^3.10"
+loguru = "^0.7.2"
+numpy = "^1.26.4"
+opencv-python = "^4.9.0.80"
+psutil = "^5.9.8"
+tabulate = "^0.9.0"
+onnx = "^1.16.0"
+onnxsim = "^0.4.36"
+tqdm = "^4.66.2"
+openvino = "2023.3"
+timm = "0.6.12"
+onnxruntime = "^1.17.3"
+torch = {version = "^2.4.0.dev20240426+cpu", source = "torch_nightly"}
+torchvision = {version = "^0.19.0.dev20240426+cpu", source = "torch_nightly"}
+onnxconverter-common = "^1.14.0"
+nncf = "^2.10.0"
+onnxruntime-openvino = "^1.17.1"
+
+
+[tool.poetry.group.dev.dependencies]
+black = "^24.4.2"
+isort = "^5.13.2"
+
+
+[[tool.poetry.source]]
+name = "torch_nightly"
+url = "https://download.pytorch.org/whl/nightly/cpu"
+priority = "explicit"
+
+[build-system]
+requires = ["poetry-core"]
+build-backend = "poetry.core.masonry.api"
