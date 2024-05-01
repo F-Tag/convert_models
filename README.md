@@ -8,5 +8,5 @@ cap_sys_nice=ep
 ```
 
 ## Midas Smallしかonnxconvertできない
-nightlyを入れればDPT_SwinV2_T_256は行ける
+2.4以降(nightly)を入れればDPT_SwinV2_T_256は行ける
 timmのバージョンに注意

@@ -16,20 +16,27 @@ tabulate = "^0.9.0"
 onnx = "^1.16.0"
 onnxsim = "^0.4.36"
 tqdm = "^4.66.2"
-openvino = "2023.3"
 timm = "0.6.12"
 onnxruntime = "^1.17.3"
-torch = {version = "^2.4.0.dev20240426+cpu", source = "torch_nightly"}
-torchvision = {version = "^0.19.0.dev20240426+cpu", source = "torch_nightly"}
 onnxconverter-common = "^1.14.0"
 nncf = "^2.10.0"
-onnxruntime-openvino = "^1.17.1"
-onnxruntime-gpu = "^1.17.1"
 
-
+[tool.poetry.group.dev]
+optional = true
 [tool.poetry.group.dev.dependencies]
 black = "^24.4.2"
 isort = "^5.13.2"
+
+[tool.poetry.group.openvino]
+optional = true
+[tool.poetry.group.openvino.dependencies]
+openvino = "2023.3"
+onnxruntime-openvino = "^1.17.1"
+
+[tool.poetry.group.cuda]
+optional = true
+[tool.poetry.group.cuda.dependencies]
+onnxruntime-gpu = "^1.17.1"
 
 
 [[tool.poetry.source]]
