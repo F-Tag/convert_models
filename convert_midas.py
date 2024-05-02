@@ -1,33 +1,44 @@
 # convert yolox models to onnx to openvino
+from argparse import ArgumentParser
 from pathlib import Path
 
 import cv2
-import numpy as np
 import onnx
-import openvino as ov
 import torch
 import torch.onnx
-from nncf import CompressWeightsMode, compress_weights
-from onnxconverter_common import auto_convert_mixed_precision, float16
 from onnxruntime import InferenceSession, SessionOptions, get_available_providers
-from onnxruntime.quantization import QuantType, quantize_dynamic
-from onnxruntime.quantization.shape_inference import quant_pre_process
 from onnxsim import simplify
 from tqdm import tqdm
 
-
-NUM_INFERENCES = 200
+from convert_models.midas.vis import draw_depth
 
 MODEL_PATH = Path("models/midas")
 OUTPUT_PATH = Path("outputs/midas")
 MODEL_PATH.mkdir(parents=True, exist_ok=True)
 OUTPUT_PATH.mkdir(parents=True, exist_ok=True)
 
-OPSET = 17
-
 
 def main():
 
+    parser = ArgumentParser("convert midas models to onnx")
+    parser.add_argument(
+        "--num-inferences", type=int, default=200, help="number of inferences"
+    )
+    parser.add_argument(
+        "--provider", type=str, default="CPUExecutionProvider", help="provider"
+    )
+    parser.add_argument(
+        "--num-simplify", type=int, default=10, help="number of simplify"
+    )
+    parser.add_argument("--opset", type=int, default=11, help="opset")
+    args = parser.parse_args()
+
+    # check provider
+    assert (
+        args.provider in get_available_providers()
+    ), f"{args.provider} not found in {get_available_providers()}"
+
+    # load MiDaS model
     model_name = "MiDaS_small"
     # model_name = "DPT_SwinV2_T_256"
     # model_name = "DPT_LeViT_224"
@@ -40,7 +51,10 @@ def main():
     model.to("cpu")
 
     # image load
-    image = cv2.imread("dataset/5418492198_2f3aec2c44_o.jpg")
+    image_path = "dataset/5418492198_2f3aec2c44_o.jpg"
+    image_path = "dataset/14028460030_79f3be107e_o.jpg"
+    image = cv2.imread(image_path)
+    assert image is not None, f"{image_path} not found"
     batch = transform(image)
 
     torch.onnx.export(
@@ -50,165 +64,94 @@ def main():
         input_names=["input"],
         output_names=["output"],
         dynamic_axes={"input": {0: "batch"}, "output": {0: "batch"}},
-        opset_version=OPSET,
+        opset_version=args.opset,
     )
 
     # simplify
     model_onnx = onnx.load(MODEL_PATH / "base.onnx")
-    for _ in range(5):
+    for _ in range(args.num_simplify):
         model_onnx, check = simplify(model_onnx)
         if not check:
             break
     onnx.save(model_onnx, MODEL_PATH / "simple.onnx")
 
-    # quantize
-    quant_pre_process(
-        MODEL_PATH / "simple.onnx",
-        MODEL_PATH / "simple_q.onnx",
-        skip_symbolic_shape=True,
-    )
-    quantize_dynamic(
-        MODEL_PATH / "simple_q.onnx",
-        MODEL_PATH / "simple_q.onnx",
-        weight_type=QuantType.QUInt8,
-    )
-
-    # convert fp16
-    model_simple = onnx.load(MODEL_PATH / "simple.onnx")
-    model_fp16 = float16.convert_float_to_float16(model_simple, keep_io_types=True)
-    # model_fp16 = auto_convert_mixed_precision(model_simple, batch, rtol=0.01, atol=0.001, keep_io_types=True)
-    onnx.save(model_fp16, MODEL_PATH / "simple_fp16.onnx")
-
-    # convert torch to openvino
-    model_torch_openvino = ov.convert_model(model, example_input=batch)
-    ov.save_model(model_torch_openvino, MODEL_PATH / "torch_openvino.xml")
-
-    # convert onnx to openvino
-    model_onnx_openvino = ov.convert_model(MODEL_PATH / "simple.onnx")
-    ov.save_model(model_onnx_openvino, MODEL_PATH / "onnx_openvino.xml")
-
-    # openvino quantize
-    model_onnx_openvino_quantize = compress_weights(
-        model_onnx_openvino,
-        mode=CompressWeightsMode.INT4_SYM,
-        group_size=64,
-        ratio=0.9,
-    )
-    ov.save_model(
-        model_onnx_openvino_quantize, MODEL_PATH / "onnx_openvino_quantize.xml"
-    )
-
-    """
-    print("running torch openvino inference ...")
-    ov_core = ov.Core()
-    model_torch_openvino = ov_core.read_model(MODEL_PATH / "torch_openvino.xml")
-    compiled_model_torch_openvino = ov.compile_model(
-        model_torch_openvino, "CPU", config={"INFERENCE_NUM_THREADS": 1}
-    )
-    output = compiled_model_torch_openvino(batch)
-    draw_depth(OUTPUT_PATH / "torch_openvino.png", output)
-    for i in tqdm(range(NUM_INFERENCES)):
-        _ = compiled_model_torch_openvino(batch)
-
-    print("running onnx openvino inference ...")
-    model_onnx_openvino = ov_core.read_model(MODEL_PATH / "torch_openvino.xml")
-    compiled_model_onnx_openvino = ov.compile_model(
-        model_onnx_openvino, "CPU", config={"INFERENCE_NUM_THREADS": 1}
-    )
-    output = compiled_model_onnx_openvino(batch)
-    draw_depth(OUTPUT_PATH / "onnx_openvino.png", output)
-    for _ in tqdm(range(NUM_INFERENCES)):
-        _ = compiled_model_onnx_openvino(batch)
-
-    print("running onnx openvino quantize inference ...")
-    model_onnx_openvino = ov_core.read_model(MODEL_PATH / "onnx_openvino_quantize.xml")
-    compiled_model_onnx_openvino = ov.compile_model(
-        model_onnx_openvino, "CPU", config={"INFERENCE_NUM_THREADS": 1}
-    )
-    output = compiled_model_onnx_openvino(batch)
-    draw_depth(OUTPUT_PATH / "onnx_openvino_quantize.png", output)
-    for _ in tqdm(range(NUM_INFERENCES)):
-        _ = compiled_model_onnx_openvino(batch)
-    """
-
+    # Run inference with torch
     print("running torch inference ...")
     with torch.no_grad():
         output = model(batch)
     draw_depth(OUTPUT_PATH / "torch.png", output)
-    for _ in tqdm(range(NUM_INFERENCES)):
+    for _ in tqdm(range(args.num_inferences)):
         with torch.no_grad():
             _ = model(batch)
 
+    # Run inference with onnxruntime
     print("running onnxruntime inference ...")
     opts = SessionOptions()
     opts.inter_op_num_threads = 1
     opts.intra_op_num_threads = 1
-    ort_sess = InferenceSession(MODEL_PATH / "base.onnx", opts)
+    ort_sess = InferenceSession(
+        MODEL_PATH / "base.onnx", opts, providers=["CPUExecutionProvider"]
+    )
     output = ort_sess.run(None, {"input": batch.numpy()})
     draw_depth(OUTPUT_PATH / "onnx.png", output)
-    for i in tqdm(range(NUM_INFERENCES)):
+    for i in tqdm(range(args.num_inferences)):
         _ = ort_sess.run(None, {"input": batch.numpy()})
 
+    # Run inference with onnxruntime simplified
     print("running onnxruntime simplified inference ...")
     ort_sess = InferenceSession(
         MODEL_PATH / "simple.onnx", opts, providers=["CPUExecutionProvider"]
     )
     output = ort_sess.run(None, {"input": batch.numpy()})
     draw_depth(OUTPUT_PATH / "onnx_simple.png", output)
-    for i in tqdm(range(NUM_INFERENCES)):
+    for i in tqdm(range(args.num_inferences)):
         _ = ort_sess.run(None, {"input": batch.numpy()})
 
-    print("running onnxruntime simplified GPU inference ...")
-    gpu_provider = "CUDAExecutionProvider"
-    # gpu_provider = "TensorrtExecutionProvider"
-    ort_sess = InferenceSession(
-        MODEL_PATH / "simple.onnx", opts, providers=[gpu_provider]
-    )
-    output = ort_sess.run(None, {"input": batch.numpy()})
-    draw_depth(OUTPUT_PATH / "onnx_simple_gpu.png", output)
-    for i in tqdm(range(NUM_INFERENCES)):
-        _ = ort_sess.run(None, {"input": batch.numpy()})
+    if args.provider == "CPUExecutionProvider":
+        return
+    elif args.provider == "OpenVINOExecutionProvider":
+        # Run inference with openvino
+        print(
+            "running onnxruntime simplified with OpenVINOExecutionProvider inference ..."
+        )
+        ort_sess = InferenceSession(
+            MODEL_PATH / "simple.onnx",
+            opts,
+            providers=["OpenVINOExecutionProvider"],
+            provider_options=[{"num_of_threads": 1}],
+        )
+        output = ort_sess.run(None, {"input": batch.numpy()})
+        draw_depth(OUTPUT_PATH / "onnx_simple_openvion_exec.png", output)
+        for i in tqdm(range(args.num_inferences)):
+            _ = ort_sess.run(None, {"input": batch.numpy()})
 
+    elif args.provider == "CUDAExecutionProvider":
+        print("running onnxruntime simplified with CUDAExecutionProvider inference ...")
+        ort_sess = InferenceSession(
+            MODEL_PATH / "simple.onnx",
+            opts,
+            providers=["CUDAExecutionProvider"],
+            provider_options=[{"device_id": 0}],
+        )
+        output = ort_sess.run(None, {"input": batch.numpy()})
+        draw_depth(OUTPUT_PATH / "onnx_simple_cuda_exec.png", output)
+        for i in tqdm(range(args.num_inferences)):
+            _ = ort_sess.run(None, {"input": batch.numpy()})
 
-    """
-    print("running onnxruntime simplified quantized inference ...")
-    ort_sess = InferenceSession(MODEL_PATH / "simple_q.onnx", opts)
-    output = ort_sess.run(None, {"input": batch.numpy()})
-    draw_depth(OUTPUT_PATH / "onnx_simple_q.png", output)
-    for i in tqdm(range(NUM_INFERENCES)):
-        _ = ort_sess.run(None, {"input": batch.numpy()})
-
-    print("running onnxruntime simplified fp16 inference ...")
-    ort_sess = InferenceSession(MODEL_PATH / "simple_fp16.onnx", opts)
-    output = ort_sess.run(None, {"input": batch.numpy()})
-    draw_depth(OUTPUT_PATH / "onnx_simple_fp16.png", output)
-    for i in tqdm(range(NUM_INFERENCES)):
-        _ = ort_sess.run(None, {"input": batch.numpy()})
-    """
-
-    print("running onnxruntime simplified with OpenVINOExecutionProvider inference ...")
-    ort_sess = InferenceSession(
-        MODEL_PATH / "simple.onnx",
-        opts,
-        providers=["OpenVINOExecutionProvider"],
-        provider_options=[{"num_of_threads": 1}],
-    )
-    output = ort_sess.run(None, {"input": batch.numpy()})
-    draw_depth(OUTPUT_PATH / "onnx_simple_openvion_exec.png", output)
-    for i in tqdm(range(NUM_INFERENCES)):
-        _ = ort_sess.run(None, {"input": batch.numpy()})
-
-
-def draw_depth(filepath, output):
-    if isinstance(output, torch.Tensor):
-        output = output.numpy()
-    if not isinstance(output, np.ndarray):
-        output = output[0]
-    output = output.squeeze(0)
-    output -= output.min()
-    output /= output.max()
-    output *= 255
-    cv2.imwrite(str(filepath), output)
+    elif args.provider == "TensorrtExecutionProvider":
+        print(
+            "running onnxruntime simplified with TensorrtExecutionProvider inference ..."
+        )
+        ort_sess = InferenceSession(
+            MODEL_PATH / "simple.onnx",
+            opts,
+            providers=["TensorrtExecutionProvider", "CUDAExecutionProvider"],
+            provider_options=[{"device_id": 0}],
+        )
+        output = ort_sess.run(None, {"input": batch.numpy()})
+        draw_depth(OUTPUT_PATH / "onnx_simple_tensorrt_exec.png", output)
+        for i in tqdm(range(args.num_inferences)):
+            _ = ort_sess.run(None, {"input": batch.numpy()})
 
 
 if __name__ == "__main__":

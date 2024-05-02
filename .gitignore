@@ -4,3 +4,4 @@
 /outputs
 /sym_shape_infer_temp.onnx
 /tests
+*.pyc
